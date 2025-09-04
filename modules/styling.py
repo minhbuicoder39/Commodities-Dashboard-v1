@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
+from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
 
 
 def configure_page_style():
@@ -31,13 +32,13 @@ def configure_page_style():
         background-color: var(--bg-light);
     }}
 
-    /* Sidebar Styling */
-    [data-testid="stSidebar"] > div:first-child {{
+    /* Sidebar Styling - Using default Streamlit background */
+    /* [data-testid="stSidebar"] > div:first-child {{
         background-color: var(--primary-teal);
-    }}
+    }} */
     
-    /* Sidebar text styling */
-    [data-testid="stSidebar"] h1,
+    /* Sidebar text styling - Using default Streamlit colors */
+    /* [data-testid="stSidebar"] h1,
     [data-testid="stSidebar"] h2,
     [data-testid="stSidebar"] h3,
     [data-testid="stSidebar"] h4,
@@ -48,15 +49,15 @@ def configure_page_style():
     }}
     [data-testid="stSidebar"] .st-emotion-cache-1g8p9hb {{
          color: #E0E0E0;
-    }}
+    }} */
     
-    /* Sidebar navigation links */
-    [data-testid="stSidebarNav"] a span {{
+    /* Sidebar navigation links - Using default Streamlit colors */
+    /* [data-testid="stSidebarNav"] a span {{
         color: #FFFFFF;
     }}
     [data-testid="stSidebarNav"] a[aria-current="page"] span {{
         color: #FFFFFF;
-    }}
+    }} */
     
     /* Hide sidebar collapse button text */
     [data-testid="stSidebarCollapseButton"] p {{
@@ -204,8 +205,19 @@ def display_market_metrics(df: pd.DataFrame):
     # Calculations
     most_bullish = df.loc[df['%Week'].idxmax()] if not df['%Week'].empty and df['%Week'].notna().any() else None
     most_bearish = df.loc[df['%Week'].idxmin()] if not df['%Week'].empty and df['%Week'].notna().any() else None
-    avg_weekly_change = df['%Week'].mean() if not df['%Week'].empty else 0
+    
+    # Placeholder for highest volatility (to be calculated later)
+    highest_volatility = "TBD"
+    
     monthly_leader = df.loc[df['%Month'].idxmax()] if not df['%Month'].empty and df['%Month'].notna().any() else None
+    
+    # Sector calculations
+    sector_performance = df.groupby('Sector')['%Week'].mean()
+    strongest_sector = sector_performance.idxmax() if not sector_performance.empty else 'N/A'
+    strongest_sector_perf = sector_performance.max() if not sector_performance.empty else 0
+    
+    # Count commodities with extreme moves (>±2%)
+    extreme_moves_count = len(df[abs(df['%Week']) > 0.02]) if not df['%Week'].empty else 0
 
     # HTML Content
     html_content = f"""
@@ -222,9 +234,9 @@ def display_market_metrics(df: pd.DataFrame):
                 <div class="value">{f"{most_bearish['%Week']:.1%}" if most_bearish is not None and pd.notna(most_bearish['%Week']) else 'N/A'}</div>
             </div>
             <div class="metric-card avg-card">
-                <div class="title">Weekly Average</div>
-                <div class="commodity-name" style="font-size: 20px;">{f"{avg_weekly_change:.1%}" if pd.notna(avg_weekly_change) else 'N/A'}</div>
-                <div class="value">All Selected</div>
+                <div class="title">Highest Volatility</div>
+                <div class="commodity-name" style="font-size: 20px;">{highest_volatility}</div>
+                <div class="value">To Calculate</div>
             </div>
             <div class="metric-card leader-card">
                 <div class="title">🏆 Monthly Leader</div>
@@ -233,17 +245,21 @@ def display_market_metrics(df: pd.DataFrame):
             </div>
         </div>
         <div class="metric-container">
-            <div class="metric-card empty-card">
-                <div>Sector 1</div>
+            <div class="metric-card leader-card">
+                <div class="title">Strongest Sector</div>
+                <div class="commodity-name">{strongest_sector}</div>
+                <div class="value">{f"{strongest_sector_perf:.1%}" if pd.notna(strongest_sector_perf) else 'N/A'}</div>
+            </div>
+            <div class="metric-card avg-card">
+                <div class="title">Extreme Moves (>±2%)</div>
+                <div class="commodity-name" style="font-size: 20px;">{extreme_moves_count}</div>
+                <div class="value">Commodities</div>
             </div>
             <div class="metric-card empty-card">
-                <div>Sector 2</div>
+                <div>Future KPI 3</div>
             </div>
             <div class="metric-card empty-card">
-                <div>Sector 3</div>
-            </div>
-            <div class="metric-card empty-card">
-                <div>Sector 4</div>
+                <div>Future KPI 4</div>
             </div>
         </div>
     </div>
@@ -347,3 +363,162 @@ def style_dataframe(df: pd.DataFrame):
     styler = styler.hide(axis="index")
     
     return styler
+
+def display_aggrid_table(df: pd.DataFrame):
+    """
+    Display a modern AG-Grid table with light theme and conditional formatting.
+    """
+    if df.empty:
+        st.warning("No data to display")
+        return
+    
+    # Prepare dataframe
+    df_display = df.copy()
+    
+    # Convert percent columns to display format (2.34 instead of 0.0234)
+    percent_cols = ["%Day", "%Week", "%Month", "%Quarter", "%YTD"]
+    for col in percent_cols:
+        if col in df_display.columns:
+            df_display[col] = df_display[col].apply(lambda x: round(x * 100, 2) if pd.notna(x) else x)
+
+    # JavaScript conditional color for percentage columns - light theme
+    color_cells = JsCode("""
+    function(params) {
+        if (params.value > 0) {
+            let alpha = Math.min(Math.abs(params.value) / 15, 1);
+            return {
+                'color': 'black',
+                'backgroundColor': `rgba(34,197,94,${alpha})`
+            };
+        } else if (params.value < 0) {
+            let alpha = Math.min(Math.abs(params.value) / 15, 1);
+            return {
+                'color': 'black',
+                'backgroundColor': `rgba(239,68,68,${alpha})`
+            };
+        }
+        return {
+            'color': 'black',
+            'backgroundColor': '#ffffff'
+        };
+    }
+    """)
+
+    # Custom CSS for light theme AG-Grid - matching original format
+    st.markdown("""
+        <style>
+        /* AG-Grid light theme styling */
+        .ag-root-wrapper, .ag-root-wrapper-body, .ag-center-cols-container,
+        .ag-header, .ag-row, .ag-cell {
+            background-color: #ffffff !important;
+            color: #1f2937 !important;
+            border-color: #e5e7eb !important;
+        }
+
+        /* Header styling */
+        .ag-header {
+            background-color: #f8fafc !important;
+            font-weight: 600 !important;
+            color: #374151 !important;
+        }
+
+        /* Row striping */
+        .ag-row-even {
+            background-color: #ffffff !important;
+        }
+        .ag-row-odd {
+            background-color: #f9fafb !important;
+        }
+
+        /* Hover effects */
+        .ag-row:hover {
+            background-color: #f3f4f6 !important;
+        }
+
+        /* Input fields */
+        .ag-floating-filter-input, .ag-input-field-input {
+            background-color: #ffffff !important;
+            color: #1f2937 !important;
+            border: 1px solid #d1d5db !important;
+        }
+
+        /* Icons */
+        .ag-icon, .ag-icon svg {
+            fill: #6b7280 !important;
+        }
+
+        /* Cell styling - compact and dense */
+        .ag-cell {
+            font-weight: 400;
+            border-bottom: 1px solid #f3f4f6 !important;
+            font-family: 'Manrope', sans-serif;
+            font-size: 13px !important;
+            padding: 6px 8px !important;
+        }
+
+        /* Header cells */
+        .ag-header-cell {
+            font-size: 12px !important;
+            padding: 8px !important;
+        }
+
+        /* Row height */
+        .ag-row {
+            height: 32px !important;
+        }
+
+        /* Sort indicators */
+        .ag-header-cell-sortable .ag-header-cell-menu-button {
+            color: #6b7280 !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
+    # Build AG-Grid options
+    gb = GridOptionsBuilder.from_dataframe(df_display)
+    gb.configure_default_column(resizable=True, filter=True, sortable=True)
+
+    # Apply conditional formatting for percentage columns
+    for col in percent_cols:
+        if col in df_display.columns:
+            gb.configure_column(col, cellStyle=color_cells, type=["numericColumn", "rightAligned"],
+                valueFormatter="x.toFixed(2)")
+
+    # Format Price column with thousand separators and 2 decimals
+    price_formatter = JsCode("function(params) { return params.value.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}); }")
+    
+    price_columns = ["Price", "Current Price", "30D Avg", "52W High", "52W Low"]
+    for col in price_columns:
+        if col in df_display.columns:
+            gb.configure_column(col, type=["numericColumn", "rightAligned"],
+                valueFormatter=price_formatter)
+
+    # Configure specific columns with icons and formatting
+    column_mappings = {
+        "Nation": "🌍 Nation",
+        "Impact": "📈 Impact Stocks",
+        "Sector": "🏭 Sector",
+        "Commodities": "📦 Commodity"
+    }
+    
+    for col, header_name in column_mappings.items():
+        if col in df_display.columns:
+            gb.configure_column(col, headerName=header_name)
+
+    # Configure grid options with scroll (no pagination)
+    gb.configure_pagination(enabled=False)
+    gb.configure_grid_options(domLayout='normal', rowHeight=32, headerHeight=40)
+    
+    # Set default column widths
+    gb.configure_default_column(width=120, minWidth=100)
+
+    # Display the grid with light theme and scroll
+    return AgGrid(
+        df_display,
+        gridOptions=gb.build(),
+        allow_unsafe_jscode=True,
+        fit_columns_on_grid_load=True,
+        height=400,
+        theme='streamlit',
+        update_mode='NO_UPDATE'
+    )

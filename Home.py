@@ -4,7 +4,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from modules.data_loader import load_data
 from modules.calculations import calculate_price_changes
-from modules.styling import configure_page_style, style_dataframe, display_market_metrics
+from modules.styling import configure_page_style, style_dataframe, display_market_metrics, display_aggrid_table
+from modules.stock_data import fetch_multiple_stocks, get_stock_tickers_from_impact
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
@@ -138,7 +139,7 @@ if df_data is not None and df_list is not None:
         st.markdown("""
          <h2 style='
         color: #00816D; 
-        font-size: 2rem; 
+        font-size: 1rem; 
         font-weight: 400;
         text-align: left;
          '>
@@ -147,28 +148,15 @@ if df_data is not None and df_list is not None:
         """, unsafe_allow_html=True)
         
         if not filtered_df.empty:
-            display_table = filtered_df.copy()
-            # Hàm style_dataframe giờ đã bao gồm cả việc ẩn index và set width 100%
-            styled_df_object = style_dataframe(display_table)
-            
-            # Tạo bảng HTML
-            html_table = styled_df_object.to_html()
-
-            # Bọc bảng HTML vào một div có chiều cao cố định và thanh cuộn
-            scrollable_container = f"""
-            <div style="height: 500px; overflow-y: auto; width: 100%;">
-                {html_table}
-            
-            """
+            display_aggrid_table(filtered_df)
         else:
             st.warning("No data matches your filter criteria.")
-        st.markdown(scrollable_container, unsafe_allow_html=True)
 
         # --- DYNAMIC BAR CHART SECTION (using Plotly) ---
         st.markdown("""
          <h3 style='
         color: #00816D; 
-        font-size: 2rem; 
+        font-size: 1rem; 
         font-weight: 400;
         text-align: left;
          '>
@@ -232,7 +220,6 @@ if df_data is not None and df_list is not None:
                             # Create subplot with 2 columns: negative (left) and positive (right)
                             fig = make_subplots(
                                 rows=1, cols=2,
-                                subplot_titles=("📉 Decreasing Performance", "📈 Increasing Performance"),
                                 horizontal_spacing=0.02,
                                 column_widths=[0.49, 0.49]
                             )
@@ -252,7 +239,7 @@ if df_data is not None and df_list is not None:
                                     y=list(range(len(negative_data))),
                                     x=negative_data[selected_column],
                                     orientation='h',
-                                    marker_color=['#e11d48' if x != 0 else 'rgba(0,0,0,0)' for x in negative_data[selected_column]],
+                                    marker_color=['rgba(225, 29, 72, 0.6)' if x != 0 else 'rgba(0,0,0,0)' for x in negative_data[selected_column]],
                                     text=negative_labels,
                                     textposition='outside',
                                     hovertemplate='<b>%{text}</b><br>Change: %{x:.1%}<extra></extra>',
@@ -275,7 +262,7 @@ if df_data is not None and df_list is not None:
                                     y=list(range(len(positive_data))),
                                     x=positive_data[selected_column],
                                     orientation='h',
-                                    marker_color=['#10b981' if x != 0 else 'rgba(0,0,0,0)' for x in positive_data[selected_column]],
+                                    marker_color=['rgba(16, 185, 129, 0.6)' if x != 0 else 'rgba(0,0,0,0)' for x in positive_data[selected_column]],
                                     text=positive_labels,
                                     textposition='outside',
                                     hovertemplate='<b>%{text}</b><br>Change: %{x:.1%}<extra></extra>',
@@ -283,7 +270,7 @@ if df_data is not None and df_list is not None:
                                     name="Increasing"
                                 ), row=1, col=2)
                             
-                            chart_height = max(300, max_items * 25)
+                            chart_height = max(300, max_items * 20)
                             
                             # Update layout
                             fig.update_layout(
@@ -292,7 +279,7 @@ if df_data is not None and df_list is not None:
                                 margin=dict(l=150, r=150, t=60, b=20),
                                 font=dict(family="Manrope, sans-serif", size=11),
                                 title=dict(
-                                    text=f"<b>{chart_label} Performance Split</b>",
+                                    text=f"<b>{chart_label} Performance </b>",
                                     x=0.5,
                                     xanchor='center',
                                     y=0.97
@@ -345,17 +332,7 @@ if df_data is not None and df_list is not None:
         st.markdown('</div>', unsafe_allow_html=True)
 
         # --- LINE CHART SECTION ---
-        st.markdown("""
-         <h3 style='
-        color: #00816D; 
-        font-size: 2rem; 
-        font-weight: 400;
-        text-align: left;
-        margin-top: 40px;
-         '>
-        Commodity Price Trends
-          </h3>
-        """, unsafe_allow_html=True)
+        
 
         if not filtered_df.empty:
             # Filter data based on date range from sidebar
@@ -364,79 +341,214 @@ if df_data is not None and df_list is not None:
                 (df_data['Date'] <= pd.to_datetime(end_date))
             ].copy()
             
-            # Get available commodities from filtered data
+            # Get available commodities from filtered data and sort alphabetically
             available_commodities = date_filtered_data['Commodities'].unique()
-            filtered_commodities = [c for c in available_commodities if c in filtered_df['Commodities'].values]
+            filtered_commodities = sorted([c for c in available_commodities if c in filtered_df['Commodities'].values])
             
             if filtered_commodities:
                 # Allow user to select specific commodities for the line chart
                 selected_line_commodities = st.multiselect(
                     "Select commodities to display in line chart:",
                     options=filtered_commodities,
-                    default=filtered_commodities[:5] if len(filtered_commodities) >= 5 else filtered_commodities,
+                    default=filtered_commodities[:1] if len(filtered_commodities) >= 1 else filtered_commodities,
                     key="line_chart_commodities"
                 )
                 
                 if selected_line_commodities:
-                    # Create line chart
-                    fig_line = go.Figure()
+                    # Get stock tickers for selected commodities
+                    selected_stocks = set()
+                    for commodity in selected_line_commodities:
+                        commodity_row = filtered_df[filtered_df['Commodities'] == commodity]
+                        if not commodity_row.empty and pd.notna(commodity_row['Impact'].iloc[0]):
+                            impact = str(commodity_row['Impact'].iloc[0]).strip()
+                            if impact:
+                                # Split by comma in case multiple stocks
+                                stock_list = [s.strip().upper() for s in impact.split(',')]
+                                selected_stocks.update(stock_list)
                     
-                    # Color palette for different commodities
-                    colors = ['#00816D', '#e11d48', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4', '#84cc16']
+                    # Create layout - side by side if we have stocks
+                    if selected_stocks:
+                        col1, col2 = st.columns(2)
+                    else:
+                        col1 = st.container()
+                        col2 = None
                     
-                    for i, commodity in enumerate(selected_line_commodities):
-                        commodity_data = date_filtered_data[date_filtered_data['Commodities'] == commodity].copy()
-                        commodity_data = commodity_data.sort_values('Date')
+                    with col1:
+                        st.markdown(f"**{selected_interval} Commodity Prices**")
+                        # Create commodity line chart
+                        fig_line = go.Figure()
                         
-                        if not commodity_data.empty:
-                            color = colors[i % len(colors)]
-                            fig_line.add_trace(go.Scatter(
-                                x=commodity_data['Date'],
-                                y=commodity_data['Price'],
-                                mode='lines+markers',
-                                name=commodity,
-                                line=dict(color=color, width=2),
-                                marker=dict(size=4),
-                                hovertemplate=f'<b>{commodity}</b><br>Date: %{{x}}<br>Price: $%{{y:.2f}}<extra></extra>'
-                            ))
+                        # Color palette for different commodities - lighter colors
+                        colors = ['#4ade80', '#f87171', '#60a5fa', '#fbbf24', '#a78bfa', '#fb7185', '#38bdf8', '#a3e635']
+                        
+                        for i, commodity in enumerate(selected_line_commodities):
+                            commodity_data = date_filtered_data[date_filtered_data['Commodities'] == commodity].copy()
+                            commodity_data = commodity_data.sort_values('Date')
+                            
+                            if not commodity_data.empty:
+                                # Apply interval aggregation
+                                if selected_interval == 'Daily':
+                                    # Use all data points
+                                    aggregated_data = commodity_data
+                                elif selected_interval == 'Weekly':
+                                    # Group by week and take the last price of each week
+                                    commodity_data['Week'] = commodity_data['Date'].dt.to_period('W')
+                                    aggregated_data = commodity_data.groupby('Week').last().reset_index()
+                                    aggregated_data['Date'] = aggregated_data['Week'].dt.end_time
+                                elif selected_interval == 'Monthly':
+                                    # Group by month and take the last price of each month
+                                    commodity_data['Month'] = commodity_data['Date'].dt.to_period('M')
+                                    aggregated_data = commodity_data.groupby('Month').last().reset_index()
+                                    aggregated_data['Date'] = aggregated_data['Month'].dt.end_time
+                                elif selected_interval == 'Quarterly':
+                                    # Group by quarter and take the last price of each quarter
+                                    commodity_data['Quarter'] = commodity_data['Date'].dt.to_period('Q')
+                                    aggregated_data = commodity_data.groupby('Quarter').last().reset_index()
+                                    aggregated_data['Date'] = aggregated_data['Quarter'].dt.end_time
+                                
+                                color = colors[i % len(colors)]
+                                fig_line.add_trace(go.Scatter(
+                                    x=aggregated_data['Date'],
+                                    y=aggregated_data['Price'],
+                                    mode='lines',
+                                    name=commodity,
+                                    line=dict(color=color, width=2),
+                                    hovertemplate=f'<b>{commodity}</b><br>Date: %{{x}}<br>Price: $%{{y:.2f}}<extra></extra>'
+                                ))
+                        
+                        # Update commodity chart layout
+                        fig_line.update_layout(
+                            template="plotly_white",
+                            height=500,
+                            margin=dict(l=50, r=50, t=40, b=50),
+                            font=dict(family="Manrope, sans-serif", size=12),
+                            xaxis_title="Date",
+                            yaxis_title="Price ($)",
+                            legend=dict(
+                                orientation="h",
+                                yanchor="bottom",
+                                y=1.02,
+                                xanchor="right",
+                                x=1
+                            ),
+                            hovermode='x unified'
+                        )
+                        
+                        # Style the axes
+                        fig_line.update_xaxes(
+                            showgrid=True,
+                            gridwidth=1,
+                            gridcolor='rgba(0,0,0,0.1)',
+                            showline=True,
+                            linewidth=1,
+                            linecolor='rgba(0,0,0,0.2)'
+                        )
+                        fig_line.update_yaxes(
+                            showgrid=True,
+                            gridwidth=1,
+                            gridcolor='rgba(0,0,0,0.1)',
+                            showline=True,
+                            linewidth=1,
+                            linecolor='rgba(0,0,0,0.2)'
+                        )
+                        
+                        st.plotly_chart(fig_line, use_container_width=True)
                     
-                    # Update layout
-                    fig_line.update_layout(
-                        template="plotly_white",
-                        height=500,
-                        margin=dict(l=50, r=50, t=40, b=50),
-                        font=dict(family="Manrope, sans-serif", size=12),
-                        xaxis_title="Date",
-                        yaxis_title="Price ($)",
-                        legend=dict(
-                            orientation="h",
-                            yanchor="bottom",
-                            y=1.02,
-                            xanchor="right",
-                            x=1
-                        ),
-                        hovermode='x unified'
-                    )
-                    
-                    # Style the axes
-                    fig_line.update_xaxes(
-                        showgrid=True,
-                        gridwidth=1,
-                        gridcolor='rgba(0,0,0,0.1)',
-                        showline=True,
-                        linewidth=1,
-                        linecolor='rgba(0,0,0,0.2)'
-                    )
-                    fig_line.update_yaxes(
-                        showgrid=True,
-                        gridwidth=1,
-                        gridcolor='rgba(0,0,0,0.1)',
-                        showline=True,
-                        linewidth=1,
-                        linecolor='rgba(0,0,0,0.2)'
-                    )
-                    
-                    st.plotly_chart(fig_line, use_container_width=True)
+                    # Stock impact chart in column 2
+                    if col2 is not None and selected_stocks:
+                        with col2:
+                            st.markdown(f"**{selected_interval} Stock Impact**")
+                            
+                            # Fetch stock data for the selected date range
+                            days_range = (pd.to_datetime(end_date) - pd.to_datetime(start_date)).days + 30  # Add buffer
+                            stock_data = fetch_multiple_stocks(list(selected_stocks), days=days_range)
+                            
+                            if stock_data:
+                                fig_stock = go.Figure()
+                                stock_colors = ['#c084fc', '#f87171', '#67e8f9', '#bef264', '#fdba74']
+                                
+                                for j, (ticker, stock_df) in enumerate(stock_data.items()):
+                                    if stock_df is not None and not stock_df.empty:
+                                        # Filter by date range - handle timezone issues
+                                        start_dt = pd.to_datetime(start_date).tz_localize(None) if pd.to_datetime(start_date).tz is None else pd.to_datetime(start_date).tz_convert(None)
+                                        end_dt = pd.to_datetime(end_date).tz_localize(None) if pd.to_datetime(end_date).tz is None else pd.to_datetime(end_date).tz_convert(None)
+                                        
+                                        # Ensure stock_df tradingDate is timezone-naive
+                                        stock_df_copy = stock_df.copy()
+                                        if stock_df_copy['tradingDate'].dt.tz is not None:
+                                            stock_df_copy['tradingDate'] = stock_df_copy['tradingDate'].dt.tz_convert(None)
+                                        
+                                        stock_filtered = stock_df_copy[
+                                            (stock_df_copy['tradingDate'] >= start_dt) & 
+                                            (stock_df_copy['tradingDate'] <= end_dt)
+                                        ].copy()
+                                        
+                                        if not stock_filtered.empty:
+                                            # Apply same interval aggregation as commodity
+                                            if selected_interval == 'Daily':
+                                                aggregated_stock = stock_filtered
+                                            elif selected_interval == 'Weekly':
+                                                stock_filtered['Week'] = stock_filtered['tradingDate'].dt.to_period('W')
+                                                aggregated_stock = stock_filtered.groupby('Week').last().reset_index()
+                                                aggregated_stock['tradingDate'] = aggregated_stock['Week'].dt.end_time
+                                            elif selected_interval == 'Monthly':
+                                                stock_filtered['Month'] = stock_filtered['tradingDate'].dt.to_period('M')
+                                                aggregated_stock = stock_filtered.groupby('Month').last().reset_index()
+                                                aggregated_stock['tradingDate'] = aggregated_stock['Month'].dt.end_time
+                                            elif selected_interval == 'Quarterly':
+                                                stock_filtered['Quarter'] = stock_filtered['tradingDate'].dt.to_period('Q')
+                                                aggregated_stock = stock_filtered.groupby('Quarter').last().reset_index()
+                                                aggregated_stock['tradingDate'] = aggregated_stock['Quarter'].dt.end_time
+                                            
+                                            color = stock_colors[j % len(stock_colors)]
+                                            fig_stock.add_trace(go.Scatter(
+                                                x=aggregated_stock['tradingDate'],
+                                                y=aggregated_stock['close'],
+                                                mode='lines',
+                                                name=ticker,
+                                                line=dict(color=color, width=2),
+                                                hovertemplate=f'<b>{ticker}</b><br>Date: %{{x}}<br>Price: %{{y:,.0f}} VND<extra></extra>'
+                                            ))
+                                
+                                # Update stock chart layout
+                                fig_stock.update_layout(
+                                    template="plotly_white",
+                                    height=500,
+                                    margin=dict(l=50, r=50, t=40, b=50),
+                                    font=dict(family="Manrope, sans-serif", size=12),
+                                    xaxis_title="Date",
+                                    yaxis_title="Price (VND)",
+                                    legend=dict(
+                                        orientation="h",
+                                        yanchor="bottom",
+                                        y=1.02,
+                                        xanchor="right",
+                                        x=1
+                                    ),
+                                    hovermode='x unified'
+                                )
+                                
+                                # Style stock chart axes
+                                fig_stock.update_xaxes(
+                                    showgrid=True,
+                                    gridwidth=1,
+                                    gridcolor='rgba(0,0,0,0.1)',
+                                    showline=True,
+                                    linewidth=1,
+                                    linecolor='rgba(0,0,0,0.2)'
+                                )
+                                fig_stock.update_yaxes(
+                                    showgrid=True,
+                                    gridwidth=1,
+                                    gridcolor='rgba(0,0,0,0.1)',
+                                    showline=True,
+                                    linewidth=1,
+                                    linecolor='rgba(0,0,0,0.2)'
+                                )
+                                
+                                st.plotly_chart(fig_stock, use_container_width=True)
+                            else:
+                                st.info("No stock data available for the selected commodities.")
                 else:
                     st.info("Please select at least one commodity to display in the line chart.")
             else:
