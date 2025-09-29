@@ -104,6 +104,8 @@ if df_data is not None and df_list is not None:
         options=interval_options,
         index=1  # Default to Weekly
     )
+    # Toggle to hide/show non-trading gaps (weekends/holidays)
+    hide_gaps = st.sidebar.checkbox("Hide non-trading gaps", value=True)
     
     # --- DATA CALCULATION ---
     # Use latest date for all current sections
@@ -322,7 +324,7 @@ if df_data is not None and df_list is not None:
                                 row=1, col=2
                             )
                             
-                            st.plotly_chart(fig, use_container_width=True)
+                            st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True})
                         else:
                             st.info(f"No data available for {chart_label} performance with the selected filters (after removing 0% changes).")
                     else:
@@ -434,15 +436,20 @@ if df_data is not None and df_list is not None:
                             hovermode='x unified'
                         )
                         
-                        # Style the axes
+                        # Style the axes with shorter dates
                         fig_line.update_xaxes(
                             showgrid=True,
                             gridwidth=1,
                             gridcolor='rgba(0,0,0,0.1)',
                             showline=True,
                             linewidth=1,
-                            linecolor='rgba(0,0,0,0.2)'
+                            linecolor='rgba(0,0,0,0.2)',
+                            tickformat='%b %d',
+                            tickangle=-30
                         )
+                        if hide_gaps:
+                            # Hide weekends while preserving date axis
+                            fig_line.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
                         fig_line.update_yaxes(
                             showgrid=True,
                             gridwidth=1,
@@ -452,7 +459,7 @@ if df_data is not None and df_list is not None:
                             linecolor='rgba(0,0,0,0.2)'
                         )
                         
-                        st.plotly_chart(fig_line, use_container_width=True)
+                        st.plotly_chart(fig_line, use_container_width=True, config={"scrollZoom": True})
                     
                     # Stock impact chart in column 2
                     if col2 is not None and selected_stocks:
@@ -528,15 +535,20 @@ if df_data is not None and df_list is not None:
                                     hovermode='x unified'
                                 )
                                 
-                                # Style stock chart axes
+                                # Style stock chart axes with shorter dates
                                 fig_stock.update_xaxes(
                                     showgrid=True,
                                     gridwidth=1,
                                     gridcolor='rgba(0,0,0,0.1)',
                                     showline=True,
                                     linewidth=1,
-                                    linecolor='rgba(0,0,0,0.2)'
+                                    linecolor='rgba(0,0,0,0.2)',
+                                    tickformat='%b %d',
+                                    tickangle=-30
                                 )
+                                if hide_gaps:
+                                    # Hide weekends while preserving date axis
+                                    fig_stock.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
                                 fig_stock.update_yaxes(
                                     showgrid=True,
                                     gridwidth=1,
@@ -546,7 +558,7 @@ if df_data is not None and df_list is not None:
                                     linecolor='rgba(0,0,0,0.2)'
                                 )
                                 
-                                st.plotly_chart(fig_stock, use_container_width=True)
+                                st.plotly_chart(fig_stock, use_container_width=True, config={"scrollZoom": True})
                             else:
                                 st.info("No stock data available for the selected commodities.")
                 else:
