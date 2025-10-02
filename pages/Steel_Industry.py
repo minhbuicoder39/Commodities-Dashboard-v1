@@ -340,7 +340,7 @@ if df_data is not None and df_list is not None:
             hovermode='x unified'
         )
         # Shorten date labels and optionally hide weekend gaps
-        fig_inputs.update_xaxes(tickformat='%b %d', tickangle=-30)
+        fig_inputs.update_xaxes(tickformat='%b %y', tickangle=-30)
         if hide_gaps:
             fig_inputs.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
         
@@ -499,7 +499,7 @@ if df_data is not None and df_list is not None:
                     showline=True,
                     linewidth=1,
                     linecolor='rgba(0,0,0,0.2)',
-                    tickformat='%b %d',
+                    tickformat='%b %y',
                     tickangle=-30,
                     row=row,
                     col=col
@@ -902,7 +902,7 @@ if df_data is not None and df_list is not None:
             # Add zero line for reference
             fig_profit_abs.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
             # Shorten date labels and optionally hide weekend gaps
-            fig_profit_abs.update_xaxes(tickformat='%b %Y', tickangle=-30)
+            fig_profit_abs.update_xaxes(tickformat='%b %y', tickangle=-30)
             if hide_gaps:
                 fig_profit_abs.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
             
@@ -958,7 +958,7 @@ if df_data is not None and df_list is not None:
             # Add zero line for reference
             fig_profit_margin.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
             # Shorten date labels and optionally hide weekend gaps
-            fig_profit_margin.update_xaxes(tickformat='%b %Y', tickangle=-30)
+            fig_profit_margin.update_xaxes(tickformat='%b %y', tickangle=-30)
             if hide_gaps:
                 fig_profit_margin.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
             # Set y-axis range to show margins clearly
@@ -1180,7 +1180,7 @@ if df_data is not None and df_list is not None:
                 fig_candle.update_yaxes(title_text="Price (VND)", row=1, col=1)
                 fig_candle.update_yaxes(title_text="Volume", row=2, col=1)
                 # Label bottom-most x-axis only
-                fig_candle.update_xaxes(title_text="Date", tickformat='%b %d', tickangle=-30, row=rows, col=1)
+                fig_candle.update_xaxes(title_text="Date", tickformat='%b %y', tickangle=-30, row=rows, col=1)
 
                 # Optionally hide weekends and ensure no range slider appears
                 if hide_gaps:

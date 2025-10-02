@@ -444,7 +444,7 @@ if df_data is not None and df_list is not None:
                             showline=True,
                             linewidth=1,
                             linecolor='rgba(0,0,0,0.2)',
-                            tickformat='%b %d',
+                            tickformat='%b %y',
                             tickangle=-30
                         )
                         if hide_gaps:
@@ -543,7 +543,7 @@ if df_data is not None and df_list is not None:
                                     showline=True,
                                     linewidth=1,
                                     linecolor='rgba(0,0,0,0.2)',
-                                    tickformat='%b %d',
+                                    tickformat='%b %y',
                                     tickangle=-30
                                 )
                                 if hide_gaps:

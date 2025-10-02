@@ -230,7 +230,7 @@ if df_data is not None and df_list is not None:
                             fig.update_yaxes(title_text="Price ($)", row=1, col=1)
                             fig.update_yaxes(title_text="Returns (%)", row=2, col=1)
                             # Shorter date labels and optional weekend breaks
-                            fig.update_xaxes(tickformat='%b %d', tickangle=-30)
+                            fig.update_xaxes(tickformat='%b %y', tickangle=-30)
                             if hide_gaps:
                                 fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
                             

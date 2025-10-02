@@ -33,9 +33,78 @@ def render_steel_volumes_section(price_pivot=None):
             st.error(f"Error loading volumes data: {str(e)}")
             return None
 
+    # Add cache clearing button for development
+    if st.button("🔄 Reload Data", help="Click to reload the latest steel volumes data"):
+        st.cache_data.clear()
+        st.rerun()
+
     volumes_df = load_volumes_data()
 
     if volumes_df is not None:
+        # Add data inspection section
+        with st.expander("📋 View Raw Data", expanded=False):
+            st.subheader("Steel Volumes Raw Data")
+            
+            # Show data info
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Records", len(volumes_df))
+            with col2:
+                st.metric("Date Range", f"{volumes_df.index.min().strftime('%Y-%m')} to {volumes_df.index.max().strftime('%Y-%m')}")
+            with col3:
+                st.metric("Products", len(set([col.split(' - ')[0] for col in volumes_df.columns])))
+            
+            # Show the raw data
+            st.dataframe(volumes_df, use_container_width=True)
+            
+            # Add download button for the raw data
+            csv_data = volumes_df.to_csv()
+            st.download_button(
+                label="📥 Download Raw Data as CSV",
+                data=csv_data,
+                file_name="steel_volumes_data.csv",
+                mime="text/csv"
+            )
+            
+            # Show data summary for each product
+            st.subheader("Data Analysis by Product")
+            products = sorted(list(set([col.split(' - ')[0] for col in volumes_df.columns])))
+            
+            for product in products:
+                st.write(f"**{product} Product Analysis:**")
+                product_cols = [col for col in volumes_df.columns if col.startswith(product)]
+                product_data = volumes_df[product_cols]
+                
+                # Check for static data patterns
+                static_periods = []
+                for col in product_cols:
+                    # Find periods where data doesn't change
+                    data_series = volumes_df[col].dropna()
+                    if len(data_series) > 1:
+                        # Check for consecutive identical values
+                        diff = data_series.diff()
+                        static_mask = diff == 0
+                        if static_mask.sum() > len(data_series) * 0.7:  # If more than 70% are identical
+                            first_change = data_series[~static_mask].index.min() if (~static_mask).any() else None
+                            static_periods.append({
+                                'column': col,
+                                'static_until': first_change,
+                                'static_value': data_series.iloc[0],
+                                'static_count': static_mask.sum()
+                            })
+                
+                if static_periods:
+                    st.warning(f"⚠️ Static data detected in {product}:")
+                    for period in static_periods:
+                        st.write(f"- {period['column']}: Static value {period['static_value']} until {period['static_until']}")
+                else:
+                    st.success(f"✅ {product} data appears to have realistic variation")
+                
+                # Show sample data
+                st.write(f"Sample {product} data:")
+                st.dataframe(product_data.head(10), use_container_width=True)
+                st.write("---")
+
         # Define constants
         billion_vnd = 1_000_000_000
         exchange_rates = {
@@ -71,9 +140,22 @@ def render_steel_volumes_section(price_pivot=None):
         company_data = company_data.dropna(how='all')
         if market_data is not None:
             market_data = market_data.dropna(how='all')
-            
-        # Find the first non-null value date after 2021
-        first_valid_date = company_data.first_valid_index()
+
+        # Find the first date with actual non-zero data for any company
+        first_valid_date = None
+        for col in company_data.columns:
+            # Find first non-zero, non-null value
+            non_zero_data = company_data[col].replace(0, pd.NA).dropna()
+            if len(non_zero_data) > 0:
+                col_first_date = non_zero_data.index[0]
+                if first_valid_date is None or col_first_date < first_valid_date:
+                    first_valid_date = col_first_date
+        
+        # If no valid date found, use the first index with any data
+        if first_valid_date is None:
+            first_valid_date = company_data.first_valid_index()
+        
+        # Trim data to start from first valid date
         if first_valid_date:
             company_data = company_data[first_valid_date:]
             if market_data is not None:
@@ -89,36 +171,43 @@ def render_steel_volumes_section(price_pivot=None):
             # Volume trends column chart
             fig = go.Figure()
             
-            # Add bars for each company
+            # Filter out companies with no data (all zeros or nulls)
+            active_companies = []
             for company in renamed_df.columns:
-                fig.add_trace(
-                    go.Bar(
-                        name=company,
-                        x=renamed_df.index,
-                        y=renamed_df[company],
-                        hovertemplate="%{x}<br>" +
-                                    f"{company}: %{{y:,.0f}}<extra></extra>"
+                company_data = renamed_df[company].fillna(0)
+                if company_data.sum() > 0:  # Only include if there's actual volume data
+                    active_companies.append(company)
+                    fig.add_trace(
+                        go.Bar(
+                            name=company,
+                            x=renamed_df.index,
+                            y=renamed_df[company],
+                            hovertemplate="%{x}<br>" +
+                                        f"{company}: %{{y:,.0f}}<extra></extra>"
+                        )
                     )
+            
+            if not active_companies:
+                st.warning(f"No volume data available for {selected_product} in the selected time period.")
+            else:
+                fig.update_layout(
+                    title=f"{selected_product} Volumes Over Time",
+                    template="plotly_white",
+                    barmode='group',
+                    height=500,
+                    showlegend=True,
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="right",
+                        x=1
+                    ),
+                    xaxis_title="Date",
+                    yaxis_title="Volume"
                 )
-            
-            fig.update_layout(
-                title=f"{selected_product} Volumes Over Time",
-                template="plotly_white",
-                barmode='group',
-                height=500,
-                showlegend=True,
-                legend=dict(
-                    orientation="h",
-                    yanchor="bottom",
-                    y=1.02,
-                    xanchor="right",
-                    x=1
-                ),
-                xaxis_title="Date",
-                yaxis_title="Volume"
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
+                
+                st.plotly_chart(fig, use_container_width=True)
 
         with tab2:
             # Market share analysis using market volume as denominator
@@ -129,74 +218,106 @@ def render_steel_volumes_section(price_pivot=None):
                 # Fallback to using sum of companies if market data is not available
                 market_share_df = renamed_df.div(renamed_df.sum(axis=1), axis=0) * 100
 
-            # Market share area chart
-            fig_share = px.area(market_share_df, 
-                               title=f"{selected_product} Market Share (%)",
-                               labels={'value': 'Market Share (%)', 'Date': 'Date', 'variable': 'Company'},
-                               height=500)
+            # Filter out companies with no data for market share
+            active_companies_share = []
+            filtered_market_share_df = pd.DataFrame(index=market_share_df.index)
             
-            fig_share.update_layout(
-                template="plotly_white",
-                hovermode='x unified',
-                legend=dict(
-                    orientation="h",
-                    yanchor="bottom",
-                    y=1.02,
-                    xanchor="right",
-                    x=1
-                )
-            )
-            st.plotly_chart(fig_share, use_container_width=True)
+            for company in market_share_df.columns:
+                company_volumes = renamed_df[company].fillna(0)
+                if company_volumes.sum() > 0:  # Only include if there's actual volume data
+                    active_companies_share.append(company)
+                    filtered_market_share_df[company] = market_share_df[company]
 
-            # Current market share pie chart
-            latest_date = market_share_df.index[-1]
-            latest_shares = market_share_df.iloc[-1]
-            
-            fig_pie = px.pie(values=latest_shares.values, 
-                            names=latest_shares.index,
-                            title=f"Current Market Share ({latest_date.strftime('%B %Y')})")
-            
-            st.plotly_chart(fig_pie, use_container_width=True)
+            if not active_companies_share:
+                st.warning(f"No volume data available for market share analysis of {selected_product}.")
+            else:
+                # Market share area chart
+                fig_share = px.area(filtered_market_share_df, 
+                                   title=f"{selected_product} Market Share (%)",
+                                   labels={'value': 'Market Share (%)', 'Date': 'Date', 'variable': 'Company'},
+                                   height=500)
+                
+                fig_share.update_layout(
+                    template="plotly_white",
+                    hovermode='x unified',
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="right",
+                        x=1
+                    )
+                )
+                st.plotly_chart(fig_share, use_container_width=True)
+
+                # Current market share pie chart
+                latest_date = filtered_market_share_df.index[-1]
+                latest_shares = filtered_market_share_df.iloc[-1]
+                
+                # Only show non-zero shares in pie chart
+                non_zero_shares = latest_shares[latest_shares > 0]
+                
+                if len(non_zero_shares) > 0:
+                    fig_pie = px.pie(values=non_zero_shares.values, 
+                                    names=non_zero_shares.index,
+                                    title=f"Current Market Share ({latest_date.strftime('%B %Y')})")
+                    
+                    st.plotly_chart(fig_pie, use_container_width=True)
+                else:
+                    st.warning(f"No market share data available for the current period ({latest_date.strftime('%B %Y')}).")
 
         with tab3:
             # Growth analysis
             st.subheader("Growth Analysis")
             
-            # Calculate YoY growth
-            yoy_df = renamed_df.pct_change(periods=12) * 100
-            current_month = renamed_df.index[-1]
+            # Filter active companies for growth analysis
+            active_companies_growth = []
+            filtered_renamed_df = pd.DataFrame(index=renamed_df.index)
             
-            # YoY growth metrics
-            cols = st.columns(len(selected_companies))
-            for i, company in enumerate(renamed_df.columns):
-                current_vol = renamed_df[company].iloc[-1]
-                yoy_growth = yoy_df[company].iloc[-1]
-                
-                with cols[i]:
-                    st.metric(
-                        label=company,
-                        value=f"{current_vol:,.0f}",
-                        delta=f"{yoy_growth:.1f}%"
-                    )
+            for company in renamed_df.columns:
+                company_volumes = renamed_df[company].fillna(0)
+                if company_volumes.sum() > 0:  # Only include if there's actual volume data
+                    active_companies_growth.append(company)
+                    filtered_renamed_df[company] = renamed_df[company]
 
-            # Growth trends chart
-            fig_growth = px.line(yoy_df,
-                                title=f"Year-over-Year Growth Rate (%)",
-                                labels={'value': 'YoY Growth (%)', 'Date': 'Date', 'variable': 'Company'},
-                                height=500)
-            
-            fig_growth.update_layout(
-                template="plotly_white",
-                hovermode='x unified',
-                legend=dict(
-                    orientation="h",
-                    yanchor="bottom",
-                    y=1.02,
-                    xanchor="right",
-                    x=1
+            if not active_companies_growth:
+                st.warning(f"No volume data available for growth analysis of {selected_product}.")
+            else:
+                # Calculate YoY growth only for active companies
+                yoy_df = filtered_renamed_df.pct_change(periods=12) * 100
+                current_month = filtered_renamed_df.index[-1]
+                
+                # YoY growth metrics
+                cols = st.columns(len(active_companies_growth))
+                for i, company in enumerate(active_companies_growth):
+                    current_vol = filtered_renamed_df[company].iloc[-1]
+                    yoy_growth = yoy_df[company].iloc[-1]
+                    
+                    with cols[i]:
+                        st.metric(
+                            label=company,
+                            value=f"{current_vol:,.0f}",
+                            delta=f"{yoy_growth:.1f}%" if not pd.isna(yoy_growth) else "N/A"
+                        )
+
+                # Growth trends chart
+                fig_growth = px.line(yoy_df,
+                                    title=f"Year-over-Year Growth Rate (%)",
+                                    labels={'value': 'YoY Growth (%)', 'Date': 'Date', 'variable': 'Company'},
+                                    height=500)
+                
+                fig_growth.update_layout(
+                    template="plotly_white",
+                    hovermode='x unified',
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="right",
+                        x=1
+                    )
                 )
-            )
-            st.plotly_chart(fig_growth, use_container_width=True)
+                st.plotly_chart(fig_growth, use_container_width=True)
 
         # Add HPG Profit Analysis Section
         if 'HPG' in selected_companies:
@@ -238,9 +359,31 @@ def render_steel_volumes_section(price_pivot=None):
             hpg_rebar = volumes_df['Rebar - HPG'] if 'Rebar - HPG' in volumes_df.columns else pd.Series(0, index=volumes_df.index)
             hpg_coil = volumes_df['Coil - HPG'] if 'Coil - HPG' in volumes_df.columns else pd.Series(0, index=volumes_df.index)
 
-            # Get profit per ton from price_pivot (30-day moving average)
+            # Find the first date with actual non-zero HPG data
+            first_hpg_date = None
+            
+            # Check Rebar data
+            rebar_non_zero = hpg_rebar.replace(0, pd.NA).dropna()
+            if len(rebar_non_zero) > 0:
+                first_hpg_date = rebar_non_zero.index[0]
+            
+            # Check Coil data
+            coil_non_zero = hpg_coil.replace(0, pd.NA).dropna()
+            if len(coil_non_zero) > 0:
+                coil_first_date = coil_non_zero.index[0]
+                if first_hpg_date is None or coil_first_date < first_hpg_date:
+                    first_hpg_date = coil_first_date
+            
+            # If no actual HPG data found, fall back to first valid index
+            if first_hpg_date is None:
+                first_hpg_date = hpg_rebar.first_valid_index()
+            
+            # Trim HPG data to start from first actual data date
+            if first_hpg_date:
+                hpg_rebar = hpg_rebar[first_hpg_date:]
+                hpg_coil = hpg_coil[first_hpg_date:]            # Get profit per ton from price_pivot (30-day moving average)
             if price_pivot is not None and 'Long_Steel_Profit' in price_pivot.columns and 'HRC_Profit' in price_pivot.columns:
-                # Use volumes data full date range as the common index
+                # Use trimmed HPG data date range as the common index
                 common_index = hpg_rebar.index
                 
                 # Get ASP (Average Selling Price) for rebar and HRC
@@ -283,13 +426,13 @@ def render_steel_volumes_section(price_pivot=None):
                 rebar_net_profit_usd = net_profit_total_usd * rebar_profit_share
                 hrc_net_profit_usd = net_profit_total_usd * hrc_profit_share
 
-                # Create exchange rate series matching the volumes index (full range from 2016)
+                # Create exchange rate series matching the trimmed HPG data index
                 exchange_rate_series = pd.Series(index=common_index, dtype=float)
                 
-                for year in range(2016, 2026):  # Extended range to cover from 2016
+                for year in range(first_hpg_date.year, 2026):  # Start from first data year
                     mask = common_index.map(lambda x: x.year) == year
                     if year <= 2021:
-                        exchange_rate_series[mask] = 22500  # Historical rate for 2016-2021
+                        exchange_rate_series[mask] = 22500  # Historical rate for early years
                     else:
                         exchange_rate_series[mask] = exchange_rates.get(year, 26500)
 
@@ -333,65 +476,85 @@ def render_steel_volumes_section(price_pivot=None):
                 fig_revenue = go.Figure()
                 colors_revenue = ['#4ade80', '#22c55e']
                 
+                # Filter out products with no revenue data
+                active_revenue_products = []
                 for i, column in enumerate(revenue_df.columns):
-                    fig_revenue.add_trace(
-                        go.Bar(
-                            name=column,
-                            x=revenue_df.index,
-                            y=revenue_df[column],
-                            marker_color=colors_revenue[i]
+                    column_data = revenue_df[column].fillna(0)
+                    if column_data.sum() > 0:  # Only include if there's actual revenue data
+                        active_revenue_products.append(column)
+                        fig_revenue.add_trace(
+                            go.Bar(
+                                name=column,
+                                x=revenue_df.index,
+                                y=revenue_df[column],
+                                marker_color=colors_revenue[i % len(colors_revenue)]
+                            )
                         )
-                    )
                 
-                fig_revenue.update_layout(
-                    title="HPG Revenue by Product (from 2016)",
-                    template="plotly_white",
-                    barmode='stack',
-                    height=400,
-                    showlegend=True,
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=1.02,
-                        xanchor="right",
-                        x=1
-                    ),
-                    xaxis_title="Date",
-                    yaxis_title="Amount (Billion VND)"
-                )
-                st.plotly_chart(fig_revenue, use_container_width=True)
+                if active_revenue_products:
+                    fig_revenue.update_layout(
+                        title=f"HPG Revenue by Product (from {first_hpg_date.strftime('%B %Y')})",
+                        template="plotly_white",
+                        barmode='stack',
+                        height=400,
+                        showlegend=True,
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="right",
+                            x=1
+                        ),
+                        xaxis_title="Date",
+                        yaxis_title="Amount (Billion VND)"
+                    )
+                    # Add date formatting for HPG revenue chart
+                    fig_revenue.update_xaxes(tickformat='%b %y', tickangle=-30)
+                    st.plotly_chart(fig_revenue, use_container_width=True)
+                else:
+                    st.warning("No revenue data available for the selected period.")
 
                 # Profit stacked column chart
                 fig_profit = go.Figure()
                 colors_profit = ['#f59e0b', '#ec4899']
                 
+                # Filter out products with no profit data
+                active_profit_products = []
                 for i, column in enumerate(profit_df.columns):
-                    fig_profit.add_trace(
-                        go.Bar(
-                            name=column,
-                            x=profit_df.index,
-                            y=profit_df[column],
-                            marker_color=colors_profit[i]
+                    column_data = profit_df[column].fillna(0)
+                    if column_data.sum() > 0:  # Only include if there's actual profit data
+                        active_profit_products.append(column)
+                        fig_profit.add_trace(
+                            go.Bar(
+                                name=column,
+                                x=profit_df.index,
+                                y=profit_df[column],
+                                marker_color=colors_profit[i % len(colors_profit)]
+                            )
                         )
-                    )
                 
-                fig_profit.update_layout(
-                    title="HPG Net Profit by Product (from 2016)",
-                    template="plotly_white",
-                    barmode='stack',
-                    height=400,
-                    showlegend=True,
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=1.02,
-                        xanchor="right",
-                        x=1
-                    ),
-                    xaxis_title="Date",
-                    yaxis_title="Amount (Billion VND)"
-                )
-                st.plotly_chart(fig_profit, use_container_width=True)
+                if active_profit_products:
+                    fig_profit.update_layout(
+                        title=f"HPG Net Profit by Product (from {first_hpg_date.strftime('%B %Y')})",
+                        template="plotly_white",
+                        barmode='stack',
+                        height=400,
+                        showlegend=True,
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="right",
+                            x=1
+                        ),
+                        xaxis_title="Date",
+                        yaxis_title="Amount (Billion VND)"
+                    )
+                    # Add date formatting for HPG profit chart
+                    fig_profit.update_xaxes(tickformat='%b %y', tickangle=-30)
+                    st.plotly_chart(fig_profit, use_container_width=True)
+                else:
+                    st.warning("No profit data available for the selected period.")
 
                 # Display key metrics
                 latest_month = revenue_df.index[-1]
